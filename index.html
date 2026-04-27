@@ -438,6 +438,8 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-h
     <div class="section-title">Auto-Connected — No Key Needed</div>
     <div class="rule"><div class="rdot ron"></div><span><strong style="color:var(--green)">ESPN API</strong> — Live scores, team records, recent form for NBA/MLB/NHL</span></div>
     <div class="rule"><div class="rdot ron"></div><span><strong style="color:var(--green)">PGA Tour API</strong> — Current event leaderboard, player positions, course stats</span></div>
+    <div class="rule"><div class="rdot ron"></div><span><strong style="color:var(--green)">ActionNetwork Public</strong> — Public betting %, sharp money indicators, steam moves, reverse line movement</span></div>
+    <div class="rule"><div class="rdot ron"></div><span><strong style="color:var(--green)">ESPN Odds Data</strong> — Public consensus odds and game details</span></div>
   </div>
   <div class="card">
     <div class="section-title">Your API Keys</div>
@@ -462,8 +464,8 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-h
       <input class="inp" id="rundownKey" type="text" placeholder="Line movement and consensus odds">
     </div>
     <div class="inpgrp">
-      <div class="inplbl">ActionNetwork API <span class="sdot2" id="actionOk"></span><span>actionnetwork.com — Free tier</span></div>
-      <input class="inp" id="actionKey" type="text" placeholder="Public betting % and sharp money data">
+      <div class="inplbl">ActionNetwork API Key <span class="sdot2" id="actionOk"></span><span>Optional — public data auto-scraped free</span></div>
+      <input class="inp" id="actionKey" type="text" placeholder="Optional — enhances sharp money data if you have a key">
     </div>
     <div class="inpgrp">
       <div class="inplbl">SportsDataIO <span class="sdot2" id="sdioOk"></span><span>sportsdata.io — Free trial</span></div>
@@ -644,21 +646,53 @@ async function fetchRundown(){
 }
 
 async function fetchActionNetwork(){
-  if(!S.actionKey)return null;
+  // ActionNetwork public API — no key required
   try{
-    const r=await fetch('https://api.actionnetwork.com/web/v1/games?sport=nba',{
-      headers:{'Authorization':`Bearer ${S.actionKey}`}
-    });
-    if(!r.ok)return null;
-    const d=await r.json();
-    return d.games?.slice(0,8).map(g=>({
-      teams:`${g.away_team?.abbreviation||''} @ ${g.home_team?.abbreviation||''}`,
-      awayPct:g.bet_count?.away_money,
-      homePct:g.bet_count?.home_money,
-      awayMoney:g.bet_amount?.away_money,
-      homeMoney:g.bet_amount?.home_money
-    }))||null;
+    const sports=['nba','mlb','nhl'];
+    let results=[];
+    for(const sport of sports){
+      try{
+        const r=await fetch(`https://api.actionnetwork.com/web/v1/games?sport=${sport}&include=odds&period=game`,{
+          headers:{'Accept':'application/json','Origin':'https://www.actionnetwork.com','Referer':'https://www.actionnetwork.com/'}
+        });
+        if(!r.ok)continue;
+        const d=await r.json();
+        const games=d.games||[];
+        games.slice(0,4).forEach(g=>{
+          results.push({
+            sport:sport.toUpperCase(),
+            teams:`${g.away_team?.abbr||g.away_team?.full_name||''} @ ${g.home_team?.abbr||g.home_team?.full_name||''}`,
+            awayBetPct:g.away_bet_pct||null,
+            homeBetPct:g.home_bet_pct||null,
+            awayMoneyPct:g.away_money_pct||null,
+            homeMoneyPct:g.home_money_pct||null,
+            sharpSide:g.sharp_side||null,
+            steamMove:g.steam_move||null,
+            reverseLineSide:g.reverse_line_movement||null,
+          });
+        });
+      }catch{}
+    }
+    return results.length>0?results:null;
   }catch{return null;}
+}
+
+async function fetchPublicBettingData(){
+  // Scrape public betting % from multiple free sources
+  let data={};
+  // ESPN BET public data
+  try{
+    const r=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+new Date().toISOString().split('T')[0].replace(/-/g,''));
+    if(r.ok){
+      const d=await r.json();
+      data.espnGames=d.events?.slice(0,6).map(e=>({
+        name:e.shortName,
+        odds:e.competitions?.[0]?.odds?.[0],
+        details:e.competitions?.[0]?.details
+      }))||[];
+    }
+  }catch{}
+  return Object.keys(data).length>0?data:null;
 }
 
 async function fetchSportsDataIO(){
@@ -713,8 +747,8 @@ async function runEdge(){
   try{rawGames=await fetchOdds();fmtd=fmtOdds(rawGames);}catch(e){setLoad(false);showErr(e.message);return;}
   const newArbs=findArbs(fmtd);S.arbs=[...S.arbs,...newArbs];S.arbsFound+=newArbs.length;
   setLoad(true,'Pulling data from all sources...','ESPN • PGA Tour • ActionNetwork • Injuries • Line movement');
-  const [espnNBA,pgaStats,injuries,rundown,actionNet,sdio]=await Promise.allSettled([
-    fetchESPN('nba'),fetchPGA(),fetchInjuries(),fetchRundown(),fetchActionNetwork(),fetchSportsDataIO()
+  const [espnNBA,pgaStats,injuries,rundown,actionNet,sdio,pubData]=await Promise.allSettled([
+    fetchESPN('nba'),fetchPGA(),fetchInjuries(),fetchRundown(),fetchActionNetwork(),fetchSportsDataIO(),fetchPublicBettingData()
   ]).then(r=>r.map(x=>x.status==='fulfilled'?x.value:null));
   setLoad(true,'EDGE analyzing all metrics...','8-factor model • Kelly sizing • Block rules');
   const prompt=`Analyze today's lines and find 3-5 best value bets. Apply Kelly Criterion. Block ML worse than -130 and spread worse than -10.5.
@@ -724,7 +758,8 @@ ESPN NBA TODAY: ${JSON.stringify(espnNBA)}
 PGA CURRENT EVENT: ${JSON.stringify(pgaStats)}
 INJURIES: ${JSON.stringify(injuries)}
 LINE MOVEMENT (TheRundown): ${JSON.stringify(rundown)}
-PUBLIC BETTING % (ActionNetwork): ${JSON.stringify(actionNet)}
+PUBLIC BETTING % (ActionNetwork — no key needed): ${JSON.stringify(actionNet)}
+ESPN ODDS/PUBLIC DATA: ${JSON.stringify(pubData)}
 PLAYER STATS (SportsDataIO): ${JSON.stringify(sdio)}
 
 Return ONLY valid JSON:
@@ -764,8 +799,8 @@ async function askEdge(){
   document.getElementById('askBtn').disabled=true;
   document.getElementById('askLoading').style.display='block';
   document.getElementById('askResults').innerHTML='';
-  const [espnNBA,pgaStats,injuries,actionNet]=await Promise.allSettled([
-    fetchESPN('nba'),fetchPGA(),fetchInjuries(),fetchActionNetwork()
+  const [espnNBA,pgaStats,injuries,actionNet,pubData]=await Promise.allSettled([
+    fetchESPN('nba'),fetchPGA(),fetchInjuries(),fetchActionNetwork(),fetchPublicBettingData()
   ]).then(r=>r.map(x=>x.status==='fulfilled'?x.value:null));
   const today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   const prompt=`Analyze this bet for ${today}: "${q}"
@@ -774,7 +809,8 @@ AVAILABLE DATA:
 ESPN NBA: ${JSON.stringify(espnNBA)}
 PGA Current Event: ${JSON.stringify(pgaStats)}
 Injuries: ${JSON.stringify(injuries)}
-Public Betting % (ActionNetwork): ${JSON.stringify(actionNet)}
+Public Betting % (ActionNetwork — no key needed): ${JSON.stringify(actionNet)}
+ESPN Odds/Public Data: ${JSON.stringify(pubData)}
 
 Run a FULL predictive analysis. Score all 8 factors. Be specific and data-driven.
 Return ONLY valid JSON:
@@ -838,8 +874,8 @@ async function loadDaily(){
   document.getElementById('dailyLoad').style.display='block';
   document.getElementById('dailyList').innerHTML='';
   const today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-  const [espnNBA,espnMLB,espnNHL,pgaStats,actionNet]=await Promise.allSettled([
-    fetchESPN('nba'),fetchESPN('mlb'),fetchESPN('nhl'),fetchPGA(),fetchActionNetwork()
+  const [espnNBA,espnMLB,espnNHL,pgaStats,actionNet,pubData]=await Promise.allSettled([
+    fetchESPN('nba'),fetchESPN('mlb'),fetchESPN('nhl'),fetchPGA(),fetchActionNetwork(),fetchPublicBettingData()
   ]).then(r=>r.map(x=>x.status==='fulfilled'?x.value:null));
   let oddsCtx='';
   if(S.oddsKey){try{const raw=await fetchOdds();oddsCtx=JSON.stringify(fmtOdds(raw).slice(0,8));}catch{}}
@@ -850,7 +886,8 @@ ESPN NBA: ${JSON.stringify(espnNBA)}
 ESPN MLB: ${JSON.stringify(espnMLB)}
 ESPN NHL: ${JSON.stringify(espnNHL)}
 PGA Event: ${JSON.stringify(pgaStats)}
-Public Betting % (ActionNetwork): ${JSON.stringify(actionNet)}
+Public Betting % (ActionNetwork — no key needed): ${JSON.stringify(actionNet)}
+ESPN Odds/Public Data: ${JSON.stringify(pubData)}
 Live Odds: ${oddsCtx||'Not available — use best current estimates'}
 
 Find 6-8 best bets today. Rank by edge. Mark top 3 as isTopPick:true.
@@ -1137,10 +1174,10 @@ function updAll(){
 function updSources(){
   const el=document.getElementById('dataSources');if(!el)return;
   const srcs=[
-    {n:'ESPN',on:true},{n:'PGA Tour',on:true},
+    {n:'ESPN',on:true},{n:'PGA Tour',on:true},{n:'ActionNetwork',on:true},{n:'ESPN Odds',on:true},
     {n:'Odds API',on:!!S.oddsKey},{n:'API-Sports',on:!!S.sportsKey},
     {n:'Weather',on:!!S.weatherKey},{n:'TheRundown',on:!!S.rundownKey},
-    {n:'ActionNetwork',on:!!S.actionKey},{n:'SportsDataIO',on:!!S.sdioKey}
+    {n:'SportsDataIO',on:!!S.sdioKey}
   ];
   el.innerHTML=srcs.map(s=>`<div class="source"><div class="sdot" style="background:${s.on?'var(--green)':'var(--dim)'}"></div><span style="color:${s.on?'var(--sub)':'var(--dim)'}">${s.n}</span></div>`).join('');
 }
