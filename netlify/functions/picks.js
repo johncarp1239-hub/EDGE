@@ -26,7 +26,8 @@ exports.handler = async (event) => {
       });
       const text = await response.text();
       if (!response.ok) return { statusCode: response.status, headers, body: JSON.stringify({ error: `Anthropic error ${response.status}: ${text.slice(0, 300)}` }) };
-      const data = JSON.parse(text);
+      let data;
+      try { data = JSON.parse(text); } catch(e) { return { statusCode: 500, headers, body: JSON.stringify({ error: 'JSON parse error: ' + e.message }) }; }
       return { statusCode: 200, headers, body: JSON.stringify(data) };
     }
 
