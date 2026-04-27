@@ -534,13 +534,24 @@ MODEL STATS: ${JSON.stringify(S.modelStats)}`;
 // ═══════════════════ CLAUDE API ═══════════════════
 async function claude(prompt,sys,maxTok=1000){
   if(!S.anthropicKey)throw new Error('No Anthropic key — go to Setup tab');
-  const r=await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','x-api-key':S.anthropicKey,'anthropic-version':'2023-06-01'},
-    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:maxTok,system:sys||SYS(),messages:[{role:'user',content:prompt}]})
-  });
-  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`Claude ${r.status}`);}
-  return(await r.json()).content?.[0]?.text||'';
+  const body=JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:maxTok,system:sys||SYS(),messages:[{role:'user',content:prompt}]});
+  const hdrs={'Content-Type':'application/json','x-api-key':S.anthropicKey,'anthropic-version':'2023-06-01'};
+  const proxies=[
+    'https://api.anthropic.com/v1/messages',
+    'https://corsproxy.io/?url=https://api.anthropic.com/v1/messages',
+    'https://api.codetabs.com/v1/proxy?quest=https://api.anthropic.com/v1/messages',
+  ];
+  let lastErr;
+  for(const url of proxies){
+    try{
+      const r=await fetch(url,{method:'POST',headers:hdrs,body});
+      if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||'Claude '+r.status);}
+      const d=await r.json();
+      const txt=d.content?.[0]?.text||'';
+      if(txt)return txt;
+    }catch(e){lastErr=e;}
+  }
+  throw new Error(lastErr?.message||'Connection failed — check Anthropic key');
 }
 
 // ═══════════════════ DATA SOURCES ═══════════════════
