@@ -22,7 +22,7 @@ exports.handler = async (event) => {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: body.maxTokens || 1000, system: body.system || 'You are a helpful assistant.', messages: [{ role: 'user', content: body.prompt || 'Say hello' }] }),
+        body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: body.maxTokens || 2000, system: body.system || 'You are a helpful assistant.', messages: [{ role: 'user', content: body.prompt || 'Say hello' }] }),
       });
       const text = await response.text();
       if (!response.ok) return { statusCode: response.status, headers, body: JSON.stringify({ error: `Anthropic error ${response.status}: ${text.slice(0, 300)}` }) };
