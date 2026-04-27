@@ -1,3 +1,20 @@
+// Netlify function timeout config
+const TIMEOUT_MS = 25000; // 25 seconds
+
+// Fetch with timeout
+async function fetchWT(url, opts = {}, ms = 5000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  try {
+    const r = await fetch(url, { ...opts, signal: controller.signal });
+    clearTimeout(id);
+    return r;
+  } catch (e) {
+    clearTimeout(id);
+    throw e;
+  }
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
@@ -30,7 +47,7 @@ exports.handler = async (event) => {
       ];
       for (const [key, path] of espnSports) {
         try {
-          const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${path}/scoreboard`);
+          const r = await fetchWT(`https://site.api.espn.com/apis/site/v2/sports/${path}/scoreboard`);
           if (r.ok) {
             const d = await r.json();
             data[key] = (d.events || []).slice(0, 6).map(e => ({
@@ -55,7 +72,7 @@ exports.handler = async (event) => {
 
       // PGA Tour — current + upcoming events
       try {
-        const r = await fetch('https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard');
+        const r = await fetchWT('https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard');
         if (r.ok) {
           const d = await r.json();
           const ev = d.events?.[0];
@@ -77,7 +94,7 @@ exports.handler = async (event) => {
 
       // ESPN Golf schedule — upcoming events
       try {
-        const r = await fetch('https://site.api.espn.com/apis/site/v2/sports/golf/pga/news');
+        const r = await fetchWT('https://site.api.espn.com/apis/site/v2/sports/golf/pga/news');
         if (r.ok) {
           const d = await r.json();
           data.pgaNews = (d.articles || []).slice(0, 3).map(a => ({ headline: a.headline, description: a.description }));
@@ -89,7 +106,7 @@ exports.handler = async (event) => {
         const results = [];
         for (const sport of ['nba', 'mlb', 'nhl', 'nfl']) {
           try {
-            const r = await fetch(`https://api.actionnetwork.com/web/v1/games?sport=${sport}&include=odds&period=game`, {
+            const r = await fetchWT(`https://api.actionnetwork.com/web/v1/games?sport=${sport}&include=odds&period=game`, {
               headers: { Accept: 'application/json', Origin: 'https://www.actionnetwork.com', Referer: 'https://www.actionnetwork.com/' }
             });
             if (r.ok) {
@@ -132,7 +149,7 @@ exports.handler = async (event) => {
 
         for (const sp of sportKeys) {
           try {
-            const r = await fetch(`https://api.the-odds-api.com/v4/sports/${sp}/odds/?apiKey=${oddsKey}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=${books}`);
+            const r = await fetchWT(`https://api.the-odds-api.com/v4/sports/${sp}/odds/?apiKey=${oddsKey}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=${books}`);
             if (r.ok) {
               const g = await r.json();
               if (Array.isArray(g)) data.oddsGames.push(...g.slice(0, 4).map(game => ({
@@ -156,7 +173,7 @@ exports.handler = async (event) => {
         data.golfOdds = [];
         for (const gs of golfKeys) {
           try {
-            const r = await fetch(`https://api.the-odds-api.com/v4/sports/${gs}/odds/?apiKey=${oddsKey}&regions=us&markets=outrights&oddsFormat=american&bookmakers=${books}`);
+            const r = await fetchWT(`https://api.the-odds-api.com/v4/sports/${gs}/odds/?apiKey=${oddsKey}&regions=us&markets=outrights&oddsFormat=american&bookmakers=${books}`);
             if (r.ok) {
               const g = await r.json();
               if (Array.isArray(g) && g.length) {
@@ -176,7 +193,7 @@ exports.handler = async (event) => {
 
         // Player props — NBA
         try {
-          const r = await fetch(`https://api.the-odds-api.com/v4/sports/basketball_nba/odds/?apiKey=${oddsKey}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel`);
+          const r = await fetchWT(`https://api.the-odds-api.com/v4/sports/basketball_nba/odds/?apiKey=${oddsKey}&regions=us&markets=player_points,player_rebounds,player_assists,player_threes&oddsFormat=american&bookmakers=draftkings,fanduel`);
           if (r.ok) {
             const g = await r.json();
             data.nbaProps = (g || []).slice(0, 3).map(game => ({
@@ -191,7 +208,7 @@ exports.handler = async (event) => {
 
         // Player props — MLB
         try {
-          const r = await fetch(`https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=${oddsKey}&regions=us&markets=batter_hits,pitcher_strikeouts,batter_home_runs&oddsFormat=american&bookmakers=draftkings,fanduel`);
+          const r = await fetchWT(`https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey=${oddsKey}&regions=us&markets=batter_hits,pitcher_strikeouts,batter_home_runs&oddsFormat=american&bookmakers=draftkings,fanduel`);
           if (r.ok) {
             const g = await r.json();
             data.mlbProps = (g || []).slice(0, 3).map(game => ({
@@ -221,7 +238,7 @@ exports.handler = async (event) => {
           const today = new Date().toISOString().split('T')[0];
           for (const sportId of [2, 3, 4]) {
             try {
-              const r = await fetch(`https://therundown-therundown-v1.p.rapidapi.com/sports/${sportId}/events/${today}`, {
+              const r = await fetchWT(`https://therundown-therundown-v1.p.rapidapi.com/sports/${sportId}/events/${today}`, {
                 headers: { 'x-rapidapi-key': k, 'x-rapidapi-host': 'therundown-therundown-v1.p.rapidapi.com' }
               });
               if (r.ok) {
@@ -535,7 +552,7 @@ Return ONLY valid JSON:
       let all = [];
       for (const sp of ['basketball_nba', 'baseball_mlb', 'icehockey_nhl']) {
         try {
-          const r = await fetch(`https://api.the-odds-api.com/v4/sports/${sp}/odds/?apiKey=${key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=${books}`);
+          const r = await fetchWT(`https://api.the-odds-api.com/v4/sports/${sp}/odds/?apiKey=${key}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=${books}`);
           if (r.ok) { const g = await r.json(); if (Array.isArray(g)) all.push(...g.slice(0, 3)); }
         } catch {}
       }
