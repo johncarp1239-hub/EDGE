@@ -27,8 +27,11 @@ exports.handler = async (event) => {
         headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: maxTokens || 1000, system, messages: [{ role: 'user', content: prompt }] }),
       });
-      const data = await r.json();
-      return { statusCode: r.status, headers, body: JSON.stringify(data) };
+      const text = await r.text();
+      let data;
+      try { data = JSON.parse(text); } catch(e) { return { statusCode: 500, headers, body: JSON.stringify({ error: 'Invalid response from Anthropic: ' + text.slice(0,200) }) }; }
+      if (!r.ok) return { statusCode: r.status, headers, body: JSON.stringify({ error: data.error?.message || 'Anthropic error: ' + r.status }) };
+      return { statusCode: 200, headers, body: JSON.stringify(data) };
     }
 
     // ── ODDS API ─────────────────────────────────────────────────────────────
