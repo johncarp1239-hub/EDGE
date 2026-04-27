@@ -123,23 +123,29 @@ exports.handler = async (event) => {
         return { sport: g.sport_title, home: g.home_team, away: g.away_team, books: bks };
       });
 
-      const systemPrompt = `You are EDGE v5 — elite sports betting AI.
+      const systemPrompt = `You are EDGE v5 — elite sports betting AI. You MUST use ONLY the actual lines and games from the data provided. Never invent lines. If odds data is available, use those exact lines. If no odds data, say so in edge field.
 HARD RULES: NEVER pick ML worse than -130. NEVER spread worse than -10.5.
-JOHN PROFILE: Target dog ML +100 to +200, underdog ATS, Golf Top 10 +150-+350. Avoid heavy favorites.
-KELLY: Quarter-Kelly sizing. Max $45. Prefer $15-$30.
-Budget: $${body.budget || 300}`;
+PROFILE: Target dog ML +100 to +200, underdog ATS, Golf Top 10 +150-+350. Avoid heavy favorites.
+SPORTS TO COVER: Look across NBA, MLB, NHL, and Golf — pick the 3 best regardless of sport.
+KELLY: Quarter-Kelly. Max $45. Prefer $15-$30. Budget: $${body.budget || 300}`;
 
-      const userPrompt = `Find 3 best value bets. Return ONLY valid JSON, nothing else.
+      const userPrompt = `Find the 3 best value bets TODAY across ALL sports (NBA, MLB, NHL, Golf). Use ONLY real lines from the odds data below. Return ONLY valid JSON.
 
-ODDS: ${JSON.stringify(fmtOdds)}
-NBA: ${JSON.stringify(espnNBA)}
-MLB: ${JSON.stringify(espnMLB)}
-PGA: ${JSON.stringify(pga)}
-SHARP MONEY: ${JSON.stringify(actionNet)}
-INJURIES: ${JSON.stringify(injuries)}
+LIVE ODDS (use these exact lines): ${JSON.stringify(fmtOdds)}
+ESPN NBA GAMES TODAY: ${JSON.stringify(espnNBA)}
+ESPN MLB GAMES TODAY: ${JSON.stringify(espnMLB)}
+PGA LEADERBOARD: ${JSON.stringify(pga)}
+SHARP MONEY DATA: ${JSON.stringify(actionNet)}
+INJURY REPORT: ${JSON.stringify(injuries)}
 
-JSON format:
-{"weeklyThesis":"one sentence","picks":[{"sport":"NBA","description":"Minnesota Timberwolves ML","bestBook":"FanDuel","line":"+155","allBookOdds":{"DraftKings":"+150","FanDuel":"+155","BetMGM":"+148","Caesars":"+152"},"stake":25,"toWin":37,"confidence":7,"winProbability":56,"edge":"why value","risk":"main risk","category":"dog_ml","factors":{"recentForm":{"score":7,"detail":"7-3 L10"},"h2h":{"score":6,"detail":"4-1 L5"},"restDays":{"score":7,"detail":"2 days"},"injuryImpact":{"score":5,"detail":"healthy"},"lineMovement":{"score":8,"detail":"moved up"},"sharpMoney":{"score":7,"detail":"sharp on dog"},"matchupEdge":{"score":6,"detail":"pace edge"},"motivation":{"score":5,"detail":"playoff spot"}}}],"blockedPicks":[]}`;
+IMPORTANT: 
+- Use REAL team names and REAL lines from the odds data above
+- Include at least 1 non-NBA pick if other sports have games
+- For Golf Top 10 props, use +150 to +350 range
+- For NHL puck lines use +1.5 odds
+
+Return ONLY this JSON (no other text):
+{"weeklyThesis":"one sentence strategy","picks":[{"sport":"NBA","description":"Team A ML","bestBook":"FanDuel","line":"+155","allBookOdds":{"DraftKings":"+150","FanDuel":"+155","BetMGM":"+148","Caesars":"+152"},"stake":25,"toWin":37,"confidence":7,"winProbability":56,"edge":"specific reason from data","risk":"main risk","category":"dog_ml","factors":{"recentForm":{"score":7,"detail":"specific"},"h2h":{"score":6,"detail":"specific"},"restDays":{"score":7,"detail":"specific"},"injuryImpact":{"score":5,"detail":"specific"},"lineMovement":{"score":8,"detail":"specific"},"sharpMoney":{"score":7,"detail":"specific"},"matchupEdge":{"score":6,"detail":"specific"},"motivation":{"score":5,"detail":"specific"}}},{"sport":"Golf","description":"Player Name Top 10","bestBook":"FanDuel","line":"+250","allBookOdds":{"DraftKings":"+240","FanDuel":"+250","BetMGM":"+230","Caesars":"+245"},"stake":15,"toWin":37,"confidence":6,"winProbability":42,"edge":"course history and strokes gained","risk":"field depth","category":"prop","factors":{"recentForm":{"score":7,"detail":"specific"},"h2h":{"score":6,"detail":"specific"},"restDays":{"score":8,"detail":"specific"},"injuryImpact":{"score":8,"detail":"healthy"},"lineMovement":{"score":6,"detail":"specific"},"sharpMoney":{"score":6,"detail":"specific"},"matchupEdge":{"score":7,"detail":"course fit"},"motivation":{"score":6,"detail":"specific"}}},{"sport":"MLB","description":"Team B ML","bestBook":"DraftKings","line":"+140","allBookOdds":{"DraftKings":"+140","FanDuel":"+135","BetMGM":"+138","Caesars":"+137"},"stake":20,"toWin":28,"confidence":6,"winProbability":54,"edge":"pitching matchup value","risk":"bullpen","category":"dog_ml","factors":{"recentForm":{"score":6,"detail":"specific"},"h2h":{"score":7,"detail":"specific"},"restDays":{"score":7,"detail":"specific"},"injuryImpact":{"score":6,"detail":"specific"},"lineMovement":{"score":6,"detail":"specific"},"sharpMoney":{"score":6,"detail":"specific"},"matchupEdge":{"score":7,"detail":"pitching edge"},"motivation":{"score":5,"detail":"specific"}}}],"blockedPicks":[]}`;
 
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -223,17 +229,26 @@ Return ONLY valid JSON:
       try { const r = await fetch('https://api.actionnetwork.com/web/v1/games?sport=nba&include=odds&period=game', { headers: { Accept: 'application/json', Origin: 'https://www.actionnetwork.com', Referer: 'https://www.actionnetwork.com/' } }); if (r.ok) { const d = await r.json(); actionNet = (d.games || []).slice(0, 3).map(g => ({ teams: `${g.away_team?.abbr || ''}@${g.home_team?.abbr || ''}`, awayPct: g.away_bet_pct, homePct: g.home_bet_pct, sharp: g.sharp_side })); } } catch {}
       if (oddsKey) { try { const r = await fetch(`https://api.the-odds-api.com/v4/sports/basketball_nba/odds/?apiKey=${oddsKey}&regions=us&markets=h2h&oddsFormat=american&bookmakers=draftkings,fanduel`); if (r.ok) { const g = await r.json(); oddsStr = JSON.stringify((g || []).slice(0, 4).map(g2 => ({ home: g2.home_team, away: g2.away_team, bks: (g2.bookmakers || []).slice(0, 2) }))); } } catch {} }
 
-      const systemPrompt = `You are EDGE v5 — elite sports betting AI. Target dog MLs, underdog spreads, golf Top 10s. Avoid ML favorites worse than -130.`;
+      const systemPrompt = `You are EDGE v5 — elite sports betting AI. Use ONLY real games and real lines from the data provided. Cover ALL sports — NBA, MLB, NHL, and Golf. Target dogs and value. Avoid ML favorites worse than -130.`;
       const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-      const userPrompt = `Best bets for ${today}. Return ONLY valid JSON.
-NBA: ${JSON.stringify(espnNBA)}
-MLB: ${JSON.stringify(espnMLB)}
-NHL: ${JSON.stringify(espnNHL)}
-PGA: ${JSON.stringify(pga)}
-Sharp: ${JSON.stringify(actionNet)}
-Odds: ${oddsStr || 'not available'}
+      const userPrompt = `Best bets for ${today} across ALL sports. Use ONLY real games from data below. Return ONLY valid JSON.
 
-{"bets":[{"rank":1,"isTopPick":true,"sport":"NBA","title":"Game","pick":"Pick","line":"+155","bestBook":"FanDuel","winProbability":60,"edgePct":21,"confidence":7,"category":"dog_ml","stake":25,"edge":"specific reason","keyFactors":["factor1","factor2","factor3"]},{"rank":2,"isTopPick":true,"sport":"MLB","title":"Game","pick":"Pick","line":"+140","bestBook":"DraftKings","winProbability":57,"edgePct":17,"confidence":6,"category":"dog_ml","stake":20,"edge":"specific reason","keyFactors":["factor1","factor2","factor3"]},{"rank":3,"isTopPick":true,"sport":"Golf","title":"Event","pick":"Player Top 10","line":"+200","bestBook":"FanDuel","winProbability":40,"edgePct":15,"confidence":6,"category":"prop","stake":15,"edge":"specific reason","keyFactors":["factor1","factor2","factor3"]},{"rank":4,"isTopPick":false,"sport":"NBA","title":"Game","pick":"Pick","line":"+125","bestBook":"BetMGM","winProbability":53,"edgePct":12,"confidence":6,"category":"dog_ml","stake":20,"edge":"reason","keyFactors":["f1","f2","f3"]},{"rank":5,"isTopPick":false,"sport":"MLB","title":"Game","pick":"Pick","line":"+130","bestBook":"Caesars","winProbability":54,"edgePct":14,"confidence":6,"category":"dog_ml","stake":20,"edge":"reason","keyFactors":["f1","f2","f3"]}]}`;
+ESPN NBA: ${JSON.stringify(espnNBA)}
+ESPN MLB: ${JSON.stringify(espnMLB)}
+ESPN NHL: ${JSON.stringify(espnNHL)}
+PGA EVENT: ${JSON.stringify(pga)}
+SHARP MONEY: ${JSON.stringify(actionNet)}
+LIVE ODDS: ${oddsStr || 'estimate based on current lines'}
+
+RULES:
+- Include picks from at least 3 different sports
+- Always include a Golf Top 10 pick if PGA event is active
+- Always include NHL puck line if NHL games today
+- Use real team/player names from the data
+- Mark top 3 as isTopPick true
+
+Return ONLY this JSON:
+{"bets":[{"rank":1,"isTopPick":true,"sport":"NBA","title":"Real Game Name","pick":"Real Team ML","line":"+155","bestBook":"FanDuel","winProbability":60,"edgePct":21,"confidence":7,"category":"dog_ml","stake":25,"edge":"specific data-driven reason","keyFactors":["real factor 1","real factor 2","real factor 3"]},{"rank":2,"isTopPick":true,"sport":"Golf","title":"Real PGA Event Name","pick":"Real Player Name Top 10","line":"+250","bestBook":"FanDuel","winProbability":40,"edgePct":15,"confidence":6,"category":"prop","stake":15,"edge":"course history and strokes gained data","keyFactors":["strokes gained","course fit","recent form"]},{"rank":3,"isTopPick":true,"sport":"MLB","title":"Real Game Name","pick":"Real Team ML","line":"+140","bestBook":"DraftKings","winProbability":55,"edgePct":15,"confidence":6,"category":"dog_ml","stake":20,"edge":"pitching matchup advantage","keyFactors":["starter ERA","bullpen","park factor"]},{"rank":4,"isTopPick":false,"sport":"NHL","title":"Real Game Name","pick":"Real Team +1.5","line":"+130","bestBook":"BetMGM","winProbability":52,"edgePct":12,"confidence":6,"category":"spread","stake":20,"edge":"puck line value","keyFactors":["goalie matchup","rest days","home ice"]},{"rank":5,"isTopPick":false,"sport":"MLB","title":"Real Game Name","pick":"Real Team ML","line":"+130","bestBook":"Caesars","winProbability":53,"edgePct":13,"confidence":6,"category":"dog_ml","stake":20,"edge":"value spot","keyFactors":["pitching","recent form","lineup"]}]}`;
 
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
